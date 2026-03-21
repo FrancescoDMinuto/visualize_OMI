@@ -1,11 +1,11 @@
 import streamlit as st
 import requests
 import plotly.graph_objects as go
-import plotly.express as px
 import pandas as pd
 import time
 from datetime import date
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 # ─────────────────────────────────────────────
 # CONFIG
@@ -13,86 +13,46 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 st.set_page_config(
     page_title="Prezzi Immobili Italia",
     page_icon="🏠",
-    layout="centered",          # centrato = meglio su mobile
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
-# Nascondi completamente sidebar e header Streamlit
 st.markdown("""
 <style>
-  /* Tema scuro base */
   html, body, .stApp { background-color: #0f1923 !important; color: #e8eaf0; }
-
-  /* Nascondi sidebar toggle e header */
-  section[data-testid="stSidebar"],
-  button[kind="header"],
-  header[data-testid="stHeader"],
-  #MainMenu, footer { display: none !important; }
-
-  /* Contenuto centrato con padding mobile */
+  section[data-testid="stSidebar"], button[kind="header"],
+  header[data-testid="stHeader"], #MainMenu, footer { display: none !important; }
   .block-container { padding: 1rem 1rem 4rem 1rem !important; max-width: 720px !important; }
-
-  /* ── Search bar stile app ── */
-  .search-card {
-    background: #1a2535;
-    border: 1px solid #2a3a50;
-    border-radius: 16px;
-    padding: 1.2rem 1.2rem 0.8rem 1.2rem;
-    margin-bottom: 1rem;
+  .card {
+    background: #1a2535; border: 1px solid #2a3a50;
+    border-radius: 16px; padding: 1.2rem; margin-bottom: 1rem;
   }
-  .search-card h2 {
-    font-size: 1.1rem; font-weight: 700;
-    color: #c8a84b; margin: 0 0 0.8rem 0;
-    font-family: Georgia, serif;
+  .card-title {
+    font-size: 0.75rem; font-weight: 700; color: #c8a84b;
+    text-transform: uppercase; letter-spacing: 0.09em; margin: 0 0 0.9rem 0;
   }
-
-  /* ── Pill buttons per acquisto/affitto ── */
-  .pill-row { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
-  .pill {
-    padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.85rem;
-    font-weight: 600; cursor: pointer; border: 1.5px solid #2a3a50;
-    background: transparent; color: #8a9ab0; transition: all .15s;
-  }
-  .pill.active { background: #c8a84b; color: #0f1923; border-color: #c8a84b; }
-
-  /* ── Tag zona ── */
   .stMultiSelect [data-baseweb="tag"] {
-    background-color: #1e3a5f !important;
-    border: 1px solid #3a6090 !important;
-    color: #a8c8f0 !important;
+    background-color: #1e3a5f !important; border: 1px solid #3a6090 !important;
+    color: #a8c8f0 !important; border-radius: 6px !important;
   }
-
-  /* ── Bottone cerca ── */
   div[data-testid="stButton"] > button {
     width: 100%; background: #c8a84b; color: #0f1923;
     font-weight: 800; font-size: 1rem; border: none;
-    border-radius: 12px; padding: 0.7rem; margin-top: 0.5rem;
-    letter-spacing: 0.03em;
+    border-radius: 12px; padding: 0.75rem; letter-spacing: 0.03em;
   }
   div[data-testid="stButton"] > button:hover { background: #dfc06a; }
-
-  /* ── Metriche ── */
   [data-testid="metric-container"] {
     background: #1a2535; border: 1px solid #2a3a50;
     border-radius: 12px; padding: 0.8rem 1rem;
   }
-  [data-testid="metric-container"] label { color: #8a9ab0 !important; font-size: 0.78rem !important; }
-  [data-testid="metric-container"] [data-testid="stMetricValue"] { font-size: 1.3rem !important; }
-
-  /* ── Selectbox / input ── */
-  .stSelectbox > div, .stTextInput > div { margin-bottom: 0 !important; }
-
-  /* ── Slider ── */
-  .stSlider [data-baseweb="slider"] { padding: 0 0.3rem; }
-
-  /* ── Sezione risultati ── */
-  .results-header {
-    font-size: 0.8rem; color: #6a7a8a; text-transform: uppercase;
+  [data-testid="metric-container"] label { color: #8a9ab0 !important; font-size: 0.75rem !important; }
+  .results-label {
+    font-size: 0.75rem; color: #6a7a8a; text-transform: uppercase;
     letter-spacing: 0.08em; margin: 1.2rem 0 0.4rem 0;
   }
-
-  /* ── Grafici responsivi ── */
-  .js-plotly-plot .plotly { width: 100% !important; }
+  @media (max-width: 600px) {
+    .block-container { padding: 0.5rem 0.5rem 3rem 0.5rem !important; }
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,87 +60,98 @@ st.markdown("""
 # ─────────────────────────────────────────────
 # COSTANTI
 # ─────────────────────────────────────────────
-BASE_URL = "https://3eurotools.it/api-quotazioni-immobiliari-omi/ricerca"
-ANNO_CORRENTE = date.today().year
+BASE_URL  = "https://3eurotools.it/api-quotazioni-immobiliari-omi/ricerca"
+ANNO_CORR = date.today().year
 
 ZONE_CANDIDATE = [
     "A1","A2","A3","A4","A5",
-    "B1","B2","B3","B4","B5","B6","B7","B8",
-    "C1","C2","C3","C4","C5","C6",
-    "D1","D2","D3","D4",
-    "E1","R1",
+    "B1","B2","B3","B4","B5","B6","B7","B8","B9",
+    "B10","B11","B12","B13","B14","B15","B16","B17","B18","B19","B20",
+    "B21","B22","B23","B24","B25","B26","B27","B28","B29","B30","B31","B32",
+    "C1","C2","C3","C4","C5","C6","C7","C8","C9","C10",
+    "D1","D2","D3","D4","E1","R1",
 ]
 
 TIPI_IMMOBILE = {
-    "🏠 Abitazioni civili":         "abitazioni_civili",
-    "🏚 Abitazioni economiche":     "abitazioni_di_tipo_economico",
-    "🏛 Abitazioni signorili":      "abitazioni_signorili",
-    "🏡 Ville e villini":           "ville_e_villini",
-    "🏪 Negozi":                    "negozi",
-    "🏢 Uffici":                    "uffici",
-    "🅿️ Box/Garage":               "box",
-    "🚗 Posti auto coperti":        "posti_auto_coperti",
-    "📦 Magazzini":                 "magazzini",
-    "🏭 Capannoni industriali":     "capannoni_industriali",
+    "🏠 Abitazioni civili":      "abitazioni_civili",
+    "🏚 Abitazioni economiche":  "abitazioni_di_tipo_economico",
+    "🏛 Abitazioni signorili":   "abitazioni_signorili",
+    "🏡 Ville e villini":        "ville_e_villini",
+    "🏪 Negozi":                 "negozi",
+    "🏢 Uffici":                 "uffici",
+    "🅿️ Box/Garage":            "box",
+    "🚗 Posti auto coperti":     "posti_auto_coperti",
+    "📦 Magazzini":              "magazzini",
+    "🏭 Capannoni industriali":  "capannoni_industriali",
 }
 
-NOMI_FASCIA = {
-    "A": "Centrale / Pregio",
-    "B": "Semicentrale",
-    "C": "Periferica",
-    "D": "Suburbana",
-    "E": "Extraurbana",
-    "R": "Rurale",
+FASCIA_LABEL = {
+    "A": "Centrale/Pregio", "B": "Semicentrale", "C": "Periferica",
+    "D": "Suburbana",       "E": "Extraurbana",  "R": "Rurale",
 }
-
-COLORI_FASCIA = {
-    "A": "#f0a500",   # oro
-    "B": "#4a9eff",   # azzurro
-    "C": "#50c878",   # verde
-    "D": "#c87850",   # arancio
-    "E": "#a87fcc",   # viola
-    "R": "#78c8c8",   # teal
+FASCIA_COLOR = {
+    "A": "#f0a500", "B": "#4a9eff", "C": "#50c878",
+    "D": "#c87850", "E": "#a87fcc", "R": "#78c8c8",
 }
 
 
 # ─────────────────────────────────────────────
-# DATI COMUNI
+# UTILS
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=86400, show_spinner=False)
-def carica_comuni() -> dict:
-    try:
-        r = requests.get(
-            "https://raw.githubusercontent.com/matteocontrini/comuni-json/master/comuni.json",
-            timeout=10)
-        r.raise_for_status()
-        return {c["nome"]: c["codiceCatastale"] for c in r.json()}
-    except Exception:
-        return {
-            "Milano": "F205", "Roma": "H501", "Napoli": "F839",
-            "Torino": "L219", "Firenze": "D612", "Bologna": "A944",
-            "Venezia": "L736", "Palermo": "G273", "Genova": "D969",
-            "Bari": "A662", "Catania": "C351", "Verona": "L781",
-            "Padova": "G224", "Trieste": "L424", "Brescia": "B157",
-        }
+def hex_to_rgba(h: str, alpha: float = 0.15) -> str:
+    h = h.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
 
-COMUNI = carica_comuni()
+def colore_zona(zona: str) -> str:
+    return FASCIA_COLOR.get(zona[0] if zona else "B", "#4a9eff")
+
+
+# ─────────────────────────────────────────────
+# CARICA PARQUET LOCALI
+# ─────────────────────────────────────────────
+BASE_DIR = Path(__file__).parent
+
+@st.cache_data(show_spinner=False)
+def carica_dati():
+    zone_df  = pd.read_parquet(BASE_DIR / "zone.parquet")
+    comuni_df = pd.read_parquet(BASE_DIR / "comuni.parquet")
+    # lookup zone: {(codice, zona): zona_descr}
+    zone_lookup = {
+        (r.codice, r.zona): r.zona_descr
+        for r in zone_df.itertuples()
+    }
+    # dict comuni: {nome_title: codice}
+    comuni_dict = dict(zip(comuni_df["nome"], comuni_df["codice"]))
+    return zone_lookup, comuni_dict
+
+ZONE_LOOKUP, COMUNI = carica_dati()
 NOMI_COMUNI = sorted(COMUNI.keys())
+
+
+# ─────────────────────────────────────────────
+# NOME ZONA LEGGIBILE
+# ─────────────────────────────────────────────
+def nome_zona(codice_comune: str, zona: str) -> str:
+    descr = ZONE_LOOKUP.get((codice_comune, zona), "")
+    if descr:
+        return f"{zona}  ·  {descr.title()}"
+    fascia = FASCIA_LABEL.get(zona[0], "") if zona else ""
+    return f"{zona}  ·  {fascia}" if fascia else zona
 
 
 # ─────────────────────────────────────────────
 # API + CACHE
 # ─────────────────────────────────────────────
-def anno_e_definitivo(anno: int) -> bool:
-    if anno < ANNO_CORRENTE - 1:
-        return True
-    if anno == ANNO_CORRENTE - 1 and date.today().month >= 7:
-        return True
+def anno_definitivo(a: int) -> bool:
+    if a < ANNO_CORR - 1: return True
+    if a == ANNO_CORR - 1 and date.today().month >= 7: return True
     return False
 
 def _chiama_api(codice, anno, tipo, op, zona):
     try:
-        p = {"codice_comune": codice, "anno": anno, "tipo_immobile": tipo,
-             "operazione": op, "metri_quadri": 100}
+        p = {"codice_comune": codice, "anno": anno,
+             "tipo_immobile": tipo, "operazione": op, "metri_quadri": 100}
         if zona:
             p["zona_omi"] = zona
         r = requests.get(BASE_URL, params=p, timeout=10)
@@ -200,8 +171,8 @@ def _fetch_rec(codice, anno, tipo, op, zona):
     return _chiama_api(codice, anno, tipo, op, zona)
 
 def fetch_q(codice, anno, tipo, op, zona=None):
-    return _fetch_def(codice, anno, tipo, op, zona) if anno_e_definitivo(anno) \
-           else _fetch_rec(codice, anno, tipo, op, zona)
+    return _fetch_def(codice, anno, tipo, op, zona) \
+           if anno_definitivo(anno) else _fetch_rec(codice, anno, tipo, op, zona)
 
 def extract_prezzi(data, tipo_api, op):
     if not data or tipo_api not in data:
@@ -220,27 +191,40 @@ def extract_prezzi(data, tipo_api, op):
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def scopri_zone(codice: str, tipo_api: str, op: str) -> list:
-    anno_t = ANNO_CORRENTE - 1 if date.today().month >= 3 else ANNO_CORRENTE - 2
+    """
+    Usa prima il parquet per sapere quali zone esistono per questo comune,
+    poi verifica con l'API quali hanno effettivamente dati per la tipologia scelta.
+    """
+    # Zone note dal parquet per questo comune
+    zone_note = [
+        r.zona for r in
+        pd.read_parquet(BASE_DIR / "zone.parquet").query(f"codice == '{codice}'").itertuples()
+    ]
+    # Unisci con le candidate standard (per comuni non nel parquet)
+    candidate = sorted(set(zone_note + ZONE_CANDIDATE),
+                       key=lambda z: (z[0], int(z[1:]) if z[1:].isdigit() else 0))
+
+    anno_t = ANNO_CORR - 1 if date.today().month >= 3 else ANNO_CORR - 2
     trovate = []
+
     def testa(z):
         d = _chiama_api(codice, anno_t, tipo_api, op, z)
         return z if extract_prezzi(d, tipo_api, op) else None
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        for res in as_completed({ex.submit(testa, z): z for z in ZONE_CANDIDATE}):
-            v = res.result()
+
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for fut in as_completed({ex.submit(testa, z): z for z in candidate}):
+            v = fut.result()
             if v:
                 trovate.append(v)
+
     trovate.sort(key=lambda z: (z[0], int(z[1:]) if z[1:].isdigit() else 0))
     return trovate
-
-def zona_label(z):
-    return f"{z}  ·  {NOMI_FASCIA.get(z[0], '')}"
 
 def fetch_serie(label, codice, anni, tipo_api, op, zona):
     rows = []
     prog = st.progress(0, text=f"Caricamento {label}…")
     for i, anno in enumerate(anni):
-        da_cache = anno_e_definitivo(anno)
+        da_cache = anno_definitivo(anno)
         d = fetch_q(codice, anno, tipo_api, op, zona)
         if not da_cache:
             time.sleep(0.35)
@@ -255,98 +239,97 @@ def fetch_serie(label, codice, anni, tipo_api, op, zona):
 
 
 # ─────────────────────────────────────────────
-# HEADER
+# UI — HEADER
 # ─────────────────────────────────────────────
 st.markdown("## 🏠 Prezzi Immobili Italia")
-st.markdown("<p style='color:#6a7a8a;font-size:0.85rem;margin-top:-0.5rem'>Dati ufficiali Agenzia delle Entrate · OMI</p>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='color:#6a7a8a;font-size:0.85rem;margin-top:-0.5rem'>"
+    "Dati ufficiali Agenzia delle Entrate · OMI</p>",
+    unsafe_allow_html=True)
+
 
 # ─────────────────────────────────────────────
-# SCHEDA DI RICERCA — tutto inline, niente sidebar
+# CARD RICERCA
 # ─────────────────────────────────────────────
-with st.container():
-    st.markdown('<div class="search-card"><h2>🔍 Cerca</h2>', unsafe_allow_html=True)
+st.markdown('<div class="card"><p class="card-title">🔍 Ricerca</p>', unsafe_allow_html=True)
 
-    # Riga 1: Comune
-    comune_sel = st.selectbox(
-        "Comune",
-        NOMI_COMUNI,
-        index=NOMI_COMUNI.index("Roma") if "Roma" in NOMI_COMUNI else 0,
-        placeholder="Scrivi il nome del comune…",
+comune_sel = st.selectbox(
+    "Comune", NOMI_COMUNI,
+    index=NOMI_COMUNI.index("Roma") if "Roma" in NOMI_COMUNI else 0,
+    placeholder="Scrivi il nome del comune…",
+    label_visibility="collapsed",
+)
+codice_comune = COMUNI[comune_sel]
+
+c1, c2 = st.columns([3, 2])
+with c1:
+    tipo_label = st.selectbox("Tipologia", list(TIPI_IMMOBILE.keys()))
+    tipo_api   = TIPI_IMMOBILE[tipo_label]
+with c2:
+    operazione = st.radio("Operazione", ["acquisto", "affitto"], horizontal=True)
+
+anni_range = st.slider("Periodo", 2004, 2025, (2012, 2024))
+anni_sel   = list(range(anni_range[0], anni_range[1] + 1))
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────
+# CARD ZONE
+# ─────────────────────────────────────────────
+st.markdown('<div class="card"><p class="card-title">📍 Zone OMI</p>', unsafe_allow_html=True)
+
+with st.spinner(f"Cerco le zone di {comune_sel}…"):
+    zone_disp = scopri_zone(codice_comune, tipo_api, operazione)
+
+zone_sel = []
+if not zone_disp:
+    st.warning("Nessuna zona trovata per questa tipologia.")
+else:
+    fasce = sorted(set(z[0] for z in zone_disp))
+    badges = " ".join(
+        f'<span style="background:{FASCIA_COLOR.get(f,"#888")};color:#0f1923;'
+        f'padding:3px 10px;border-radius:999px;font-size:0.72rem;font-weight:700">'
+        f'{FASCIA_LABEL.get(f, f)}</span>'
+        for f in fasce
+    )
+    st.markdown(badges + "<br><br>", unsafe_allow_html=True)
+
+    opzioni = {nome_zona(codice_comune, z): z for z in zone_disp}
+
+    # Default: prima zona di ogni fascia (max 4)
+    default, viste = [], set()
+    for z in zone_disp:
+        if z[0] not in viste:
+            default.append(nome_zona(codice_comune, z))
+            viste.add(z[0])
+        if len(default) >= 4:
+            break
+
+    sel_labels = st.multiselect(
+        f"{len(zone_disp)} zone — seleziona quelle da confrontare (max 6)",
+        options=list(opzioni.keys()),
+        default=default,
+        max_selections=6,
         label_visibility="collapsed",
     )
-    codice_comune = COMUNI[comune_sel]
+    zone_sel = [opzioni[l] for l in sel_labels]
 
-    # Riga 2: Tipologia + Acquisto/Affitto affiancati
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        tipo_label = st.selectbox("Tipologia", list(TIPI_IMMOBILE.keys()),
-                                  label_visibility="visible")
-        tipo_api = TIPI_IMMOBILE[tipo_label]
-    with c2:
-        operazione = st.radio("Operazione", ["acquisto", "affitto"],
-                              horizontal=True, label_visibility="visible")
+st.caption(
+    "[Visualizza zone su mappa →]"
+    "(https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php)")
+st.markdown('</div>', unsafe_allow_html=True)
 
-    # Riga 3: Periodo
-    anni_range = st.slider("Periodo di analisi", 2004, 2025, (2012, 2024),
-                           label_visibility="visible")
-    anni_sel = list(range(anni_range[0], anni_range[1] + 1))
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# ZONE — caricate automaticamente al cambio comune
-# ─────────────────────────────────────────────
-with st.container():
-    st.markdown('<div class="search-card"><h2>📍 Zone OMI disponibili</h2>', unsafe_allow_html=True)
-
-    with st.spinner(f"Cerco le zone di **{comune_sel}**…"):
-        zone_disp = scopri_zone(codice_comune, tipo_api, operazione)
-
-    if not zone_disp:
-        st.warning("Nessuna zona trovata. Prova una tipologia diversa.")
-        zone_sel = []
-    else:
-        # Mostra badge per ogni fascia presente
-        fasce = sorted(set(z[0] for z in zone_disp))
-        badges = " ".join(
-            f'<span style="background:{COLORI_FASCIA.get(f,"#888")};color:#0f1923;'
-            f'padding:2px 8px;border-radius:999px;font-size:0.75rem;font-weight:700">'
-            f'{f} – {NOMI_FASCIA.get(f,"")}</span>'
-            for f in fasce
-        )
-        st.markdown(badges + "<br>", unsafe_allow_html=True)
-
-        opzioni = {zona_label(z): z for z in zone_disp}
-        # Default: prima zona di ogni fascia (max 4)
-        default = []
-        viste = set()
-        for z in zone_disp:
-            if z[0] not in viste:
-                default.append(zona_label(z))
-                viste.add(z[0])
-            if len(default) >= 4:
-                break
-
-        sel_labels = st.multiselect(
-            f"{len(zone_disp)} zone trovate — seleziona quelle da confrontare (max 6)",
-            options=list(opzioni.keys()),
-            default=default,
-            max_selections=6,
-            label_visibility="collapsed",
-        )
-        zone_sel = [opzioni[l] for l in sel_labels]
-
-    st.caption("[Visualizza zone su mappa →](https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php)")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ─────────────────────────────────────────────
-# BOTTONE CERCA
+# BOTTONE
 # ─────────────────────────────────────────────
 avvia = st.button(
-    f"📊 Analizza {comune_sel}",
-    disabled=len(zone_sel) == 0,
+    f"📊  Analizza  {comune_sel}",
+    disabled=(len(zone_sel) == 0),
     use_container_width=True,
 )
+
 
 # ─────────────────────────────────────────────
 # ESECUZIONE
@@ -354,39 +337,41 @@ avvia = st.button(
 if avvia:
     tutti_df = []
     for zona in zone_sel:
-        label = f"{zona} – {NOMI_FASCIA.get(zona[0], zona)}"
+        label = nome_zona(codice_comune, zona)
         df = fetch_serie(label, codice_comune, anni_sel, tipo_api, operazione, zona)
         if not df.empty:
             tutti_df.append(df)
 
     if not tutti_df:
-        st.error("Nessun dato trovato per le zone e il periodo selezionati.")
+        st.error("Nessun dato trovato. Prova un periodo o zone diverse.")
         st.stop()
 
     st.session_state.update({
-        "df_all": pd.concat(tutti_df, ignore_index=True),
+        "df_all":     pd.concat(tutti_df, ignore_index=True),
         "operazione": operazione,
         "anni_range": anni_range,
         "comune_sel": comune_sel,
-        "zone_sel": zone_sel,
     })
+
 
 # ─────────────────────────────────────────────
 # RISULTATI
 # ─────────────────────────────────────────────
 if "df_all" in st.session_state:
-    df_all   = st.session_state["df_all"]
-    op       = st.session_state["operazione"]
-    c_nome   = st.session_state["comune_sel"]
-    unita    = "€/mq" if op == "acquisto" else "€/mq/mese"
-    labels   = df_all["label"].unique().tolist()
-    palette  = [COLORI_FASCIA.get(l[0], "#4a9eff") for l in labels]
-    c_map    = dict(zip(labels, palette))
+    df_all = st.session_state["df_all"]
+    op     = st.session_state["operazione"]
+    c_nome = st.session_state["comune_sel"]
+    unita  = "€/mq" if op == "acquisto" else "€/mq/mese"
+    labels = df_all["label"].unique().tolist()
+    c_map  = {l: colore_zona(l.split("·")[0].strip()) for l in labels}
 
-    st.markdown(f'<p class="results-header">📍 {c_nome} · {"Acquisto" if op=="acquisto" else "Affitto"}</p>',
-                unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="results-label">📍 {c_nome} · '
+        f'{"Acquisto" if op=="acquisto" else "Affitto"} · '
+        f'{st.session_state["anni_range"][0]}–{st.session_state["anni_range"][1]}</p>',
+        unsafe_allow_html=True)
 
-    # ── Metriche ultima quotazione ──
+    # ── Metriche ──
     cols = st.columns(min(len(labels), 3))
     for i, label in enumerate(labels):
         dfl = df_all[df_all["label"] == label].sort_values("anno")
@@ -403,18 +388,18 @@ if "df_all" in st.session_state:
 
     st.divider()
 
-    # ── Grafico andamento prezzi ──
+    # ── Grafico andamento ──
     fig = go.Figure()
     for label in labels:
         dfl = df_all[df_all["label"] == label].sort_values("anno")
         col = c_map[label]
-        # Fascia min-max
+
         if dfl["min"].notna().any():
             fig.add_trace(go.Scatter(
                 x=pd.concat([dfl["anno"], dfl["anno"][::-1]]),
                 y=pd.concat([dfl["max"], dfl["min"][::-1]]),
                 fill="toself",
-                fillcolor=col.replace("#", "rgba(").replace(")", ",0.10)") if col.startswith("#") else col,
+                fillcolor=hex_to_rgba(col, 0.15),
                 line=dict(color="rgba(0,0,0,0)"),
                 showlegend=False, hoverinfo="skip",
             ))
@@ -439,7 +424,7 @@ if "df_all" in st.session_state:
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    # ── Grafico variazione % YoY ──
+    # ── Grafico YoY ──
     fig2 = go.Figure()
     for label in labels:
         dfl = df_all[df_all["label"] == label].sort_values("anno").copy()
@@ -475,5 +460,5 @@ if "df_all" in st.session_state:
 
     st.markdown(
         "<p style='text-align:center;color:#3a4a5a;font-size:0.75rem;margin-top:2rem'>"
-        "Fonte: Agenzia delle Entrate · Osservatorio Mercato Immobiliare (OMI) · 100 mq commerciali</p>",
+        "Fonte: Agenzia delle Entrate · OMI · 100 mq commerciali</p>",
         unsafe_allow_html=True)
