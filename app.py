@@ -11,55 +11,82 @@ from datetime import date
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="Mercato Immobiliare OMI",
-    page_icon="🏙️",
+    page_icon="🏠",
     layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
 <style>
-    .stApp { background-color: #0e1117; }
-    h1 { font-family: Georgia, serif; }
-    .stMultiSelect [data-baseweb="tag"] { background-color: #c8a84b !important; }
+  .stApp { background-color: #0e1117; }
+  h1, h2, h3 { font-family: Georgia, serif; }
+
+  section[data-testid="stSidebar"] > div { padding: 1rem 0.75rem; }
+  .stMultiSelect [data-baseweb="tag"] { background-color: #c8a84b !important; }
+
+  .stButton > button[kind="primary"] {
+    background-color: #c8a84b;
+    color: #0e1117;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+  }
+  .stButton > button[kind="primary"]:hover { background-color: #dfc06a; }
+
+  [data-testid="metric-container"] {
+    background-color: #1a1d27;
+    border: 1px solid #2a2d3a;
+    border-radius: 10px;
+    padding: 0.6rem 0.8rem;
+  }
+
+  @media (max-width: 768px) {
+    header[data-testid="stHeader"] { display: none; }
+    .stApp { padding-top: 0.5rem; }
+  }
 </style>
 """, unsafe_allow_html=True)
 
+
 # ─────────────────────────────────────────────
-# DATI DI RIFERIMENTO
+# CARICA COMUNI DA GITHUB (cache 24h)
+# Repo: matteocontrini/comuni-json
 # ─────────────────────────────────────────────
-COMUNI = {
-    "Milano": "F205",
-    "Roma": "H501",
-    "Napoli": "F839",
-    "Torino": "L219",
-    "Firenze": "D612",
-    "Bologna": "A944",
-    "Venezia": "L736",
-    "Palermo": "G273",
-    "Genova": "D969",
-    "Bari": "A662",
-    "Catania": "C351",
-    "Verona": "L781",
-    "Padova": "G224",
-    "Trieste": "L424",
-    "Brescia": "B157",
-    "Bergamo": "A794",
-    "Modena": "F257",
-    "Parma": "G337",
-    "Perugia": "G478",
-    "Reggio Calabria": "H224",
-}
+@st.cache_data(show_spinner="Caricamento lista comuni…", ttl=86400)
+def carica_comuni() -> dict:
+    try:
+        url = "https://raw.githubusercontent.com/matteocontrini/comuni-json/master/comuni.json"
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return {c["nome"]: c["codiceCatastale"] for c in data}
+    except Exception:
+        # Fallback città principali se GitHub non raggiungibile
+        return {
+            "Milano": "F205", "Roma": "H501", "Napoli": "F839",
+            "Torino": "L219", "Firenze": "D612", "Bologna": "A944",
+            "Venezia": "L736", "Palermo": "G273", "Genova": "D969",
+            "Bari": "A662", "Catania": "C351", "Verona": "L781",
+            "Padova": "G224", "Trieste": "L424", "Brescia": "B157",
+            "Bergamo": "A794", "Modena": "F257", "Parma": "G337",
+            "Perugia": "G478", "Reggio Calabria": "H224",
+        }
+
+
+COMUNI = carica_comuni()
+NOMI_COMUNI = sorted(COMUNI.keys())
 
 TIPI_IMMOBILE = {
-    "Abitazioni civili (A/2)": "abitazioni_civili",
-    "Abitazioni economiche (A/3-4-5)": "abitazioni_di_tipo_economico",
-    "Abitazioni signorili (A/1)": "abitazioni_signorili",
-    "Ville e villini (A/7-8)": "ville_e_villini",
-    "Negozi (C/1)": "negozi",
-    "Uffici (A/10)": "uffici",
-    "Box/Garage (C/6)": "box",
-    "Posti auto coperti": "posti_auto_coperti",
-    "Magazzini (C/2)": "magazzini",
-    "Capannoni industriali (D/7)": "capannoni_industriali",
+    "Abitazioni civili (A/2)":           "abitazioni_civili",
+    "Abitazioni economiche (A/3-4-5)":   "abitazioni_di_tipo_economico",
+    "Abitazioni signorili (A/1)":        "abitazioni_signorili",
+    "Ville e villini (A/7-8)":           "ville_e_villini",
+    "Negozi (C/1)":                      "negozi",
+    "Uffici (A/10)":                     "uffici",
+    "Box/Garage (C/6)":                  "box",
+    "Posti auto coperti":                "posti_auto_coperti",
+    "Magazzini (C/2)":                   "magazzini",
+    "Capannoni industriali (D/7)":       "capannoni_industriali",
 }
 
 ANNI_DISPONIBILI = list(range(2004, 2026))
@@ -69,21 +96,7 @@ BASE_URL = "https://3eurotools.it/api-quotazioni-immobiliari-omi/ricerca"
 
 # ─────────────────────────────────────────────
 # CACHE INTELLIGENTE
-#
-# Su Streamlit Cloud il filesystem è effimero (si resetta ad ogni riavvio),
-# quindi non usiamo file su disco ma st.cache_data:
-#
-#   - anni DEFINITIVI (storici consolidati) → ttl=None (permanente finché
-#     il server è in piedi, sopravvive a tutte le sessioni utente)
-#
-#   - anni RECENTI non consolidati (anno corrente e ultimo se prima di luglio)
-#     → ttl=300 (5 min), così si aggiornano quando escono nuovi dati OMI
-#
-# Un anno è "definitivo" se:
-#   - è almeno 2 anni fa, OPPURE
-#   - è l'anno scorso e siamo dopo luglio (il S2 OMI è già pubblicato)
 # ─────────────────────────────────────────────
-
 def anno_e_definitivo(anno: int) -> bool:
     if anno < ANNO_CORRENTE - 1:
         return True
@@ -113,41 +126,31 @@ def _chiama_api(codice_comune, anno, tipo_immobile, operazione, zona_omi):
 
 @st.cache_data(ttl=None, show_spinner=False)
 def _fetch_definitivo(codice_comune, anno, tipo_immobile, operazione, zona_omi):
-    """Cache PERMANENTE: ttl=None = non scade mai finché il server è attivo."""
     return _chiama_api(codice_comune, anno, tipo_immobile, operazione, zona_omi)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _fetch_recente(codice_comune, anno, tipo_immobile, operazione, zona_omi):
-    """Cache da 5 minuti per anni non ancora consolidati."""
     return _chiama_api(codice_comune, anno, tipo_immobile, operazione, zona_omi)
 
 
 def fetch_quotazione(codice_comune, anno, tipo_immobile, operazione, zona_omi=None):
     if anno_e_definitivo(anno):
         return _fetch_definitivo(codice_comune, anno, tipo_immobile, operazione, zona_omi)
-    else:
-        return _fetch_recente(codice_comune, anno, tipo_immobile, operazione, zona_omi)
+    return _fetch_recente(codice_comune, anno, tipo_immobile, operazione, zona_omi)
 
 
 def extract_prezzi(data, tipo_immobile_api, operazione):
     if not data or tipo_immobile_api not in data:
         return None
     d = data[tipo_immobile_api]
-    if operazione == "acquisto":
-        return {
-            "min": d.get("prezzo_acquisto_min"),
-            "max": d.get("prezzo_acquisto_max"),
-            "medio": d.get("prezzo_acquisto_medio"),
-            "stato": d.get("stato_di_conservazione_mediano_della_zona", "—"),
-        }
-    else:
-        return {
-            "min": d.get("prezzo_affitto_min"),
-            "max": d.get("prezzo_affitto_max"),
-            "medio": d.get("prezzo_affitto_medio"),
-            "stato": d.get("stato_di_conservazione_mediano_della_zona", "—"),
-        }
+    key = "acquisto" if operazione == "acquisto" else "affitto"
+    return {
+        "min":   d.get(f"prezzo_{key}_min"),
+        "max":   d.get(f"prezzo_{key}_max"),
+        "medio": d.get(f"prezzo_{key}_medio"),
+        "stato": d.get("stato_di_conservazione_mediano_della_zona", "—"),
+    }
 
 
 def fetch_serie_storica(label, codice_comune, anni, tipo_immobile_api, operazione, zona_omi=None):
@@ -163,29 +166,29 @@ def fetch_serie_storica(label, codice_comune, anni, tipo_immobile_api, operazion
             cache_hits += 1
         else:
             api_calls += 1
-            time.sleep(0.35)  # throttle solo per chiamate reali all'API
+            time.sleep(0.35)
 
         prezzi = extract_prezzi(data, tipo_immobile_api, operazione)
         if prezzi and prezzi["medio"]:
             rows.append({
-                "anno": anno,
+                "anno":  anno,
                 "label": label,
                 "medio": prezzi["medio"],
-                "min": prezzi["min"],
-                "max": prezzi["max"],
+                "min":   prezzi["min"],
+                "max":   prezzi["max"],
                 "stato": prezzi["stato"],
                 "fonte": "💾 cache" if da_cache else "🌐 API",
             })
 
-        stato_txt = "💾 cache" if da_cache else f"🌐 API {anno}"
-        progress.progress((i + 1) / len(anni), text=f"{label} — {stato_txt}")
+        progress.progress((i + 1) / len(anni),
+                          text=f"{label} — {'💾' if da_cache else f'🌐 {anno}'}")
 
     progress.empty()
     df = pd.DataFrame(rows)
     if not df.empty:
-        msg = f"**{label}**: {cache_hits} anni da cache permanente"
+        msg = f"**{label}**: {cache_hits} anni da cache"
         if api_calls:
-            msg += f" · {api_calls} anni scaricati dall'API (non ancora consolidati)"
+            msg += f" · {api_calls} anni dall'API"
         st.caption(msg)
     return df
 
@@ -204,7 +207,12 @@ with st.sidebar:
     st.divider()
 
     if modalita == "Zone dello stesso comune":
-        comune_sel = st.selectbox("Comune", list(COMUNI.keys()))
+        comune_sel = st.selectbox(
+            "Comune",
+            NOMI_COMUNI,
+            index=NOMI_COMUNI.index("Roma") if "Roma" in NOMI_COMUNI else 0,
+            placeholder="Scrivi per cercare…",
+        )
         codice_comune = COMUNI[comune_sel]
 
         st.markdown("**Zone OMI** *(lascia vuoto per l'intero comune)*")
@@ -216,10 +224,14 @@ with st.sidebar:
              f"{comune_sel} – {z}" if z else f"{comune_sel} (intero comune)")
             for z in zone_list
         ]
+
     else:
         comuni_sel = st.multiselect(
-            "Scegli i comuni (max 6)", list(COMUNI.keys()),
-            default=["Milano", "Roma"], max_selections=6,
+            "Scegli i comuni (max 6)",
+            NOMI_COMUNI,
+            default=["Milano", "Roma"] if "Milano" in NOMI_COMUNI else NOMI_COMUNI[:2],
+            max_selections=6,
+            placeholder="Scrivi per cercare…",
         )
         zona_c = st.text_input("Zona OMI per tutti (opzionale)", placeholder="es: B1")
         zona_c = zona_c.strip().upper() or None
@@ -242,10 +254,8 @@ with st.sidebar:
     anni_fresh = len(anni_sel) - anni_def
     st.markdown("**💾 Cache in memoria**")
     st.caption(
-        f"Periodo selezionato: **{anni_def}** anni in cache permanente"
+        f"**{anni_def}** anni in cache permanente"
         + (f", **{anni_fresh}** aggiornati dall'API." if anni_fresh else ".")
-        + "\n\nLa cache permanente sopravvive a tutte le sessioni utente "
-        "finché il server Streamlit è attivo."
     )
     st.divider()
     st.caption(
@@ -258,7 +268,7 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
-st.title("🏙️ Mercato Immobiliare Italia")
+st.title("🏠 Mercato Immobiliare Italia")
 st.markdown(
     f"**{tipo_label}** · {'Acquisto' if operazione == 'acquisto' else 'Affitto/mese'} · "
     f"{anni_range[0]}–{anni_range[1]} · 100 mq commerciali"
@@ -319,23 +329,30 @@ if "df_all" in st.session_state:
         yaxis=dict(title=f"Prezzo ({unita})", gridcolor="#2a2d3a", tickformat=",.0f"),
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         font=dict(color="#cdd1e0"),
-        legend=dict(bgcolor="#1a1d27", bordercolor="#2a2d3a", borderwidth=1),
-        hovermode="x unified", height=480,
+        legend=dict(bgcolor="#1a1d27", bordercolor="#2a2d3a", borderwidth=1,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hovermode="x unified",
+        height=420,
+        margin=dict(l=10, r=10, t=60, b=10),
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── Metriche ──
+    # ── Metriche (max 3 per riga per non spiaccicarsi su mobile) ──
     st.subheader("📊 Riepilogo")
-    cols = st.columns(len(labels))
-    for col_ui, label in zip(cols, labels):
+    n_cols = min(len(labels), 3)
+    cols = st.columns(n_cols)
+    for i, label in enumerate(labels):
         dfl = df_all[df_all["label"] == label].sort_values("anno")
         if dfl.empty:
             continue
         ultimo, primo = dfl.iloc[-1], dfl.iloc[0]
         var = ((ultimo["medio"] - primo["medio"]) / primo["medio"] * 100) if primo["medio"] else 0
-        with col_ui:
-            st.metric(label=label, value=f"{ultimo['medio']:,.0f} {unita}",
-                      delta=f"{var:+.1f}% dal {int(primo['anno'])}")
+        with cols[i % n_cols]:
+            st.metric(
+                label=label,
+                value=f"{ultimo['medio']:,.0f} {unita}",
+                delta=f"{var:+.1f}% dal {int(primo['anno'])}",
+            )
             st.caption(f"Anno: {int(ultimo['anno'])} · Stato zona: *{ultimo['stato']}*")
 
     # ── Variazione % YoY ──
@@ -355,8 +372,10 @@ if "df_all" in st.session_state:
         yaxis=dict(title="Variazione %", gridcolor="#2a2d3a", ticksuffix="%"),
         plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
         font=dict(color="#cdd1e0"),
-        legend=dict(bgcolor="#1a1d27", bordercolor="#2a2d3a", borderwidth=1),
-        height=360,
+        legend=dict(bgcolor="#1a1d27", bordercolor="#2a2d3a", borderwidth=1,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        height=320,
+        margin=dict(l=10, r=10, t=50, b=10),
     )
     st.plotly_chart(fig2, use_container_width=True)
 
@@ -365,13 +384,17 @@ if "df_all" in st.session_state:
         df_show = df_all[["anno", "label", "min", "medio", "max", "stato", "fonte"]].copy()
         df_show.columns = ["Anno", "Serie", f"Min ({unita})", f"Medio ({unita})", f"Max ({unita})", "Stato zona", "Fonte"]
         st.dataframe(df_show.sort_values(["Serie", "Anno"]), use_container_width=True, hide_index=True)
-        st.download_button("⬇️ Scarica CSV",
-                           df_show.to_csv(index=False).encode("utf-8"),
-                           "quotazioni_omi.csv", "text/csv")
+        st.download_button(
+            "⬇️ Scarica CSV",
+            df_show.to_csv(index=False).encode("utf-8"),
+            "quotazioni_omi.csv", "text/csv",
+            use_container_width=True,
+        )
 
 else:
     st.info(
-        "👈 **Configura la ricerca** nella barra laterale e premi **Analizza andamento**.\n\n"
+        "👈 Apri la **barra laterale** (freccia in alto a sinistra), "
+        "configura la ricerca e premi **Analizza andamento**.\n\n"
         "**Puoi confrontare:**\n"
         "- Diverse **zone OMI** dello stesso comune (es: B1, B3, C1 di Milano)\n"
         "- Più **comuni** tra loro (es: Milano vs Roma vs Napoli)\n\n"
