@@ -5,97 +5,170 @@ import plotly.express as px
 import pandas as pd
 import time
 from datetime import date
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─────────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="Mercato Immobiliare OMI",
+    page_title="Prezzi Immobili Italia",
     page_icon="🏠",
-    layout="wide",
+    layout="centered",          # centrato = meglio su mobile
     initial_sidebar_state="collapsed",
 )
 
+# Nascondi completamente sidebar e header Streamlit
 st.markdown("""
 <style>
-  .stApp { background-color: #0e1117; }
-  h1, h2, h3 { font-family: Georgia, serif; }
+  /* Tema scuro base */
+  html, body, .stApp { background-color: #0f1923 !important; color: #e8eaf0; }
 
-  section[data-testid="stSidebar"] > div { padding: 1rem 0.75rem; }
-  .stMultiSelect [data-baseweb="tag"] { background-color: #c8a84b !important; }
+  /* Nascondi sidebar toggle e header */
+  section[data-testid="stSidebar"],
+  button[kind="header"],
+  header[data-testid="stHeader"],
+  #MainMenu, footer { display: none !important; }
 
-  .stButton > button[kind="primary"] {
-    background-color: #c8a84b;
-    color: #0e1117;
-    font-weight: 700;
-    border: none;
-    border-radius: 8px;
+  /* Contenuto centrato con padding mobile */
+  .block-container { padding: 1rem 1rem 4rem 1rem !important; max-width: 720px !important; }
+
+  /* ── Search bar stile app ── */
+  .search-card {
+    background: #1a2535;
+    border: 1px solid #2a3a50;
+    border-radius: 16px;
+    padding: 1.2rem 1.2rem 0.8rem 1.2rem;
+    margin-bottom: 1rem;
   }
-  .stButton > button[kind="primary"]:hover { background-color: #dfc06a; }
+  .search-card h2 {
+    font-size: 1.1rem; font-weight: 700;
+    color: #c8a84b; margin: 0 0 0.8rem 0;
+    font-family: Georgia, serif;
+  }
 
+  /* ── Pill buttons per acquisto/affitto ── */
+  .pill-row { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; flex-wrap: wrap; }
+  .pill {
+    padding: 0.4rem 1rem; border-radius: 999px; font-size: 0.85rem;
+    font-weight: 600; cursor: pointer; border: 1.5px solid #2a3a50;
+    background: transparent; color: #8a9ab0; transition: all .15s;
+  }
+  .pill.active { background: #c8a84b; color: #0f1923; border-color: #c8a84b; }
+
+  /* ── Tag zona ── */
+  .stMultiSelect [data-baseweb="tag"] {
+    background-color: #1e3a5f !important;
+    border: 1px solid #3a6090 !important;
+    color: #a8c8f0 !important;
+  }
+
+  /* ── Bottone cerca ── */
+  div[data-testid="stButton"] > button {
+    width: 100%; background: #c8a84b; color: #0f1923;
+    font-weight: 800; font-size: 1rem; border: none;
+    border-radius: 12px; padding: 0.7rem; margin-top: 0.5rem;
+    letter-spacing: 0.03em;
+  }
+  div[data-testid="stButton"] > button:hover { background: #dfc06a; }
+
+  /* ── Metriche ── */
   [data-testid="metric-container"] {
-    background-color: #1a1d27;
-    border: 1px solid #2a2d3a;
-    border-radius: 10px;
-    padding: 0.6rem 0.8rem;
+    background: #1a2535; border: 1px solid #2a3a50;
+    border-radius: 12px; padding: 0.8rem 1rem;
+  }
+  [data-testid="metric-container"] label { color: #8a9ab0 !important; font-size: 0.78rem !important; }
+  [data-testid="metric-container"] [data-testid="stMetricValue"] { font-size: 1.3rem !important; }
+
+  /* ── Selectbox / input ── */
+  .stSelectbox > div, .stTextInput > div { margin-bottom: 0 !important; }
+
+  /* ── Slider ── */
+  .stSlider [data-baseweb="slider"] { padding: 0 0.3rem; }
+
+  /* ── Sezione risultati ── */
+  .results-header {
+    font-size: 0.8rem; color: #6a7a8a; text-transform: uppercase;
+    letter-spacing: 0.08em; margin: 1.2rem 0 0.4rem 0;
   }
 
-  @media (max-width: 768px) {
-    header[data-testid="stHeader"] { display: none; }
-    .stApp { padding-top: 0.5rem; }
-  }
+  /* ── Grafici responsivi ── */
+  .js-plotly-plot .plotly { width: 100% !important; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
-# CARICA COMUNI DA GITHUB (cache 24h)
-# Repo: matteocontrini/comuni-json
+# COSTANTI
 # ─────────────────────────────────────────────
-@st.cache_data(show_spinner="Caricamento lista comuni…", ttl=86400)
+BASE_URL = "https://3eurotools.it/api-quotazioni-immobiliari-omi/ricerca"
+ANNO_CORRENTE = date.today().year
+
+ZONE_CANDIDATE = [
+    "A1","A2","A3","A4","A5",
+    "B1","B2","B3","B4","B5","B6","B7","B8",
+    "C1","C2","C3","C4","C5","C6",
+    "D1","D2","D3","D4",
+    "E1","R1",
+]
+
+TIPI_IMMOBILE = {
+    "🏠 Abitazioni civili":         "abitazioni_civili",
+    "🏚 Abitazioni economiche":     "abitazioni_di_tipo_economico",
+    "🏛 Abitazioni signorili":      "abitazioni_signorili",
+    "🏡 Ville e villini":           "ville_e_villini",
+    "🏪 Negozi":                    "negozi",
+    "🏢 Uffici":                    "uffici",
+    "🅿️ Box/Garage":               "box",
+    "🚗 Posti auto coperti":        "posti_auto_coperti",
+    "📦 Magazzini":                 "magazzini",
+    "🏭 Capannoni industriali":     "capannoni_industriali",
+}
+
+NOMI_FASCIA = {
+    "A": "Centrale / Pregio",
+    "B": "Semicentrale",
+    "C": "Periferica",
+    "D": "Suburbana",
+    "E": "Extraurbana",
+    "R": "Rurale",
+}
+
+COLORI_FASCIA = {
+    "A": "#f0a500",   # oro
+    "B": "#4a9eff",   # azzurro
+    "C": "#50c878",   # verde
+    "D": "#c87850",   # arancio
+    "E": "#a87fcc",   # viola
+    "R": "#78c8c8",   # teal
+}
+
+
+# ─────────────────────────────────────────────
+# DATI COMUNI
+# ─────────────────────────────────────────────
+@st.cache_data(ttl=86400, show_spinner=False)
 def carica_comuni() -> dict:
     try:
-        url = "https://raw.githubusercontent.com/matteocontrini/comuni-json/master/comuni.json"
-        r = requests.get(url, timeout=10)
+        r = requests.get(
+            "https://raw.githubusercontent.com/matteocontrini/comuni-json/master/comuni.json",
+            timeout=10)
         r.raise_for_status()
-        data = r.json()
-        return {c["nome"]: c["codiceCatastale"] for c in data}
+        return {c["nome"]: c["codiceCatastale"] for c in r.json()}
     except Exception:
-        # Fallback città principali se GitHub non raggiungibile
         return {
             "Milano": "F205", "Roma": "H501", "Napoli": "F839",
             "Torino": "L219", "Firenze": "D612", "Bologna": "A944",
             "Venezia": "L736", "Palermo": "G273", "Genova": "D969",
             "Bari": "A662", "Catania": "C351", "Verona": "L781",
             "Padova": "G224", "Trieste": "L424", "Brescia": "B157",
-            "Bergamo": "A794", "Modena": "F257", "Parma": "G337",
-            "Perugia": "G478", "Reggio Calabria": "H224",
         }
-
 
 COMUNI = carica_comuni()
 NOMI_COMUNI = sorted(COMUNI.keys())
 
-TIPI_IMMOBILE = {
-    "Abitazioni civili (A/2)":           "abitazioni_civili",
-    "Abitazioni economiche (A/3-4-5)":   "abitazioni_di_tipo_economico",
-    "Abitazioni signorili (A/1)":        "abitazioni_signorili",
-    "Ville e villini (A/7-8)":           "ville_e_villini",
-    "Negozi (C/1)":                      "negozi",
-    "Uffici (A/10)":                     "uffici",
-    "Box/Garage (C/6)":                  "box",
-    "Posti auto coperti":                "posti_auto_coperti",
-    "Magazzini (C/2)":                   "magazzini",
-    "Capannoni industriali (D/7)":       "capannoni_industriali",
-}
-
-ANNI_DISPONIBILI = list(range(2004, 2026))
-ANNO_CORRENTE = date.today().year
-BASE_URL = "https://3eurotools.it/api-quotazioni-immobiliari-omi/ricerca"
-
 
 # ─────────────────────────────────────────────
-# CACHE INTELLIGENTE
+# API + CACHE
 # ─────────────────────────────────────────────
 def anno_e_definitivo(anno: int) -> bool:
     if anno < ANNO_CORRENTE - 1:
@@ -104,299 +177,303 @@ def anno_e_definitivo(anno: int) -> bool:
         return True
     return False
 
-
-def _chiama_api(codice_comune, anno, tipo_immobile, operazione, zona_omi):
-    params = {
-        "codice_comune": codice_comune,
-        "anno": anno,
-        "tipo_immobile": tipo_immobile,
-        "operazione": operazione,
-        "metri_quadri": 100,
-    }
-    if zona_omi:
-        params["zona_omi"] = zona_omi
+def _chiama_api(codice, anno, tipo, op, zona):
     try:
-        r = requests.get(BASE_URL, params=params, timeout=10)
+        p = {"codice_comune": codice, "anno": anno, "tipo_immobile": tipo,
+             "operazione": op, "metri_quadri": 100}
+        if zona:
+            p["zona_omi"] = zona
+        r = requests.get(BASE_URL, params=p, timeout=10)
         if r.status_code == 200:
-            return r.json()
+            d = r.json()
+            return d if d else None
     except Exception:
         pass
     return None
 
-
 @st.cache_data(ttl=None, show_spinner=False)
-def _fetch_definitivo(codice_comune, anno, tipo_immobile, operazione, zona_omi):
-    return _chiama_api(codice_comune, anno, tipo_immobile, operazione, zona_omi)
-
+def _fetch_def(codice, anno, tipo, op, zona):
+    return _chiama_api(codice, anno, tipo, op, zona)
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _fetch_recente(codice_comune, anno, tipo_immobile, operazione, zona_omi):
-    return _chiama_api(codice_comune, anno, tipo_immobile, operazione, zona_omi)
+def _fetch_rec(codice, anno, tipo, op, zona):
+    return _chiama_api(codice, anno, tipo, op, zona)
 
+def fetch_q(codice, anno, tipo, op, zona=None):
+    return _fetch_def(codice, anno, tipo, op, zona) if anno_e_definitivo(anno) \
+           else _fetch_rec(codice, anno, tipo, op, zona)
 
-def fetch_quotazione(codice_comune, anno, tipo_immobile, operazione, zona_omi=None):
-    if anno_e_definitivo(anno):
-        return _fetch_definitivo(codice_comune, anno, tipo_immobile, operazione, zona_omi)
-    return _fetch_recente(codice_comune, anno, tipo_immobile, operazione, zona_omi)
-
-
-def extract_prezzi(data, tipo_immobile_api, operazione):
-    if not data or tipo_immobile_api not in data:
+def extract_prezzi(data, tipo_api, op):
+    if not data or tipo_api not in data:
         return None
-    d = data[tipo_immobile_api]
-    key = "acquisto" if operazione == "acquisto" else "affitto"
+    d = data[tipo_api]
+    k = "acquisto" if op == "acquisto" else "affitto"
+    m = d.get(f"prezzo_{k}_medio")
+    if not m:
+        return None
     return {
-        "min":   d.get(f"prezzo_{key}_min"),
-        "max":   d.get(f"prezzo_{key}_max"),
-        "medio": d.get(f"prezzo_{key}_medio"),
+        "min":   d.get(f"prezzo_{k}_min"),
+        "max":   d.get(f"prezzo_{k}_max"),
+        "medio": m,
         "stato": d.get("stato_di_conservazione_mediano_della_zona", "—"),
     }
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def scopri_zone(codice: str, tipo_api: str, op: str) -> list:
+    anno_t = ANNO_CORRENTE - 1 if date.today().month >= 3 else ANNO_CORRENTE - 2
+    trovate = []
+    def testa(z):
+        d = _chiama_api(codice, anno_t, tipo_api, op, z)
+        return z if extract_prezzi(d, tipo_api, op) else None
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        for res in as_completed({ex.submit(testa, z): z for z in ZONE_CANDIDATE}):
+            v = res.result()
+            if v:
+                trovate.append(v)
+    trovate.sort(key=lambda z: (z[0], int(z[1:]) if z[1:].isdigit() else 0))
+    return trovate
 
-def fetch_serie_storica(label, codice_comune, anni, tipo_immobile_api, operazione, zona_omi=None):
+def zona_label(z):
+    return f"{z}  ·  {NOMI_FASCIA.get(z[0], '')}"
+
+def fetch_serie(label, codice, anni, tipo_api, op, zona):
     rows = []
-    cache_hits, api_calls = 0, 0
-    progress = st.progress(0, text=f"Caricamento {label}…")
-
+    prog = st.progress(0, text=f"Caricamento {label}…")
     for i, anno in enumerate(anni):
         da_cache = anno_e_definitivo(anno)
-        data = fetch_quotazione(codice_comune, anno, tipo_immobile_api, operazione, zona_omi)
-
-        if da_cache:
-            cache_hits += 1
-        else:
-            api_calls += 1
+        d = fetch_q(codice, anno, tipo_api, op, zona)
+        if not da_cache:
             time.sleep(0.35)
-
-        prezzi = extract_prezzi(data, tipo_immobile_api, operazione)
-        if prezzi and prezzi["medio"]:
-            rows.append({
-                "anno":  anno,
-                "label": label,
-                "medio": prezzi["medio"],
-                "min":   prezzi["min"],
-                "max":   prezzi["max"],
-                "stato": prezzi["stato"],
-                "fonte": "💾 cache" if da_cache else "🌐 API",
-            })
-
-        progress.progress((i + 1) / len(anni),
-                          text=f"{label} — {'💾' if da_cache else f'🌐 {anno}'}")
-
-    progress.empty()
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        msg = f"**{label}**: {cache_hits} anni da cache"
-        if api_calls:
-            msg += f" · {api_calls} anni dall'API"
-        st.caption(msg)
-    return df
+        p = extract_prezzi(d, tipo_api, op)
+        if p:
+            rows.append({"anno": anno, "label": label,
+                         "medio": p["medio"], "min": p["min"],
+                         "max": p["max"], "stato": p["stato"]})
+        prog.progress((i + 1) / len(anni), text=f"{label} · {anno}")
+    prog.empty()
+    return pd.DataFrame(rows)
 
 
 # ─────────────────────────────────────────────
-# SIDEBAR
+# HEADER
 # ─────────────────────────────────────────────
-with st.sidebar:
-    st.title("⚙️ Configurazione")
-    st.divider()
+st.markdown("## 🏠 Prezzi Immobili Italia")
+st.markdown("<p style='color:#6a7a8a;font-size:0.85rem;margin-top:-0.5rem'>Dati ufficiali Agenzia delle Entrate · OMI</p>", unsafe_allow_html=True)
 
-    modalita = st.radio(
-        "Cosa vuoi confrontare?",
-        ["Zone dello stesso comune", "Più comuni a confronto"],
+# ─────────────────────────────────────────────
+# SCHEDA DI RICERCA — tutto inline, niente sidebar
+# ─────────────────────────────────────────────
+with st.container():
+    st.markdown('<div class="search-card"><h2>🔍 Cerca</h2>', unsafe_allow_html=True)
+
+    # Riga 1: Comune
+    comune_sel = st.selectbox(
+        "Comune",
+        NOMI_COMUNI,
+        index=NOMI_COMUNI.index("Roma") if "Roma" in NOMI_COMUNI else 0,
+        placeholder="Scrivi il nome del comune…",
+        label_visibility="collapsed",
     )
-    st.divider()
+    codice_comune = COMUNI[comune_sel]
 
-    if modalita == "Zone dello stesso comune":
-        comune_sel = st.selectbox(
-            "Comune",
-            NOMI_COMUNI,
-            index=NOMI_COMUNI.index("Roma") if "Roma" in NOMI_COMUNI else 0,
-            placeholder="Scrivi per cercare…",
-        )
-        codice_comune = COMUNI[comune_sel]
+    # Riga 2: Tipologia + Acquisto/Affitto affiancati
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        tipo_label = st.selectbox("Tipologia", list(TIPI_IMMOBILE.keys()),
+                                  label_visibility="visible")
+        tipo_api = TIPI_IMMOBILE[tipo_label]
+    with c2:
+        operazione = st.radio("Operazione", ["acquisto", "affitto"],
+                              horizontal=True, label_visibility="visible")
 
-        st.markdown("**Zone OMI** *(lascia vuoto per l'intero comune)*")
-        st.caption("[Trova la tua zona OMI →](https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php)")
-        zone_input = st.text_input("Zone separate da virgola", placeholder="es: B1, B3, C1")
-        zone_list = [z.strip().upper() for z in zone_input.split(",") if z.strip()] or [None]
-        serie_params = [
-            (comune_sel, codice_comune, z,
-             f"{comune_sel} – {z}" if z else f"{comune_sel} (intero comune)")
-            for z in zone_list
-        ]
-
-    else:
-        comuni_sel = st.multiselect(
-            "Scegli i comuni (max 6)",
-            NOMI_COMUNI,
-            default=["Milano", "Roma"] if "Milano" in NOMI_COMUNI else NOMI_COMUNI[:2],
-            max_selections=6,
-            placeholder="Scrivi per cercare…",
-        )
-        zona_c = st.text_input("Zona OMI per tutti (opzionale)", placeholder="es: B1")
-        zona_c = zona_c.strip().upper() or None
-        serie_params = [
-            (c, COMUNI[c], zona_c, f"{c}{' – ' + zona_c if zona_c else ''}")
-            for c in comuni_sel
-        ]
-
-    st.divider()
-    tipo_label = st.selectbox("Tipologia immobile", list(TIPI_IMMOBILE.keys()))
-    tipo_api = TIPI_IMMOBILE[tipo_label]
-    operazione = st.radio("Operazione", ["acquisto", "affitto"], horizontal=True)
-    anni_range = st.slider("Periodo", min_value=2004, max_value=2025, value=(2010, 2024))
+    # Riga 3: Periodo
+    anni_range = st.slider("Periodo di analisi", 2004, 2025, (2012, 2024),
+                           label_visibility="visible")
     anni_sel = list(range(anni_range[0], anni_range[1] + 1))
 
-    avvia = st.button("🔍 Analizza andamento", type="primary", use_container_width=True)
-
-    st.divider()
-    anni_def = sum(1 for a in anni_sel if anno_e_definitivo(a))
-    anni_fresh = len(anni_sel) - anni_def
-    st.markdown("**💾 Cache in memoria**")
-    st.caption(
-        f"**{anni_def}** anni in cache permanente"
-        + (f", **{anni_fresh}** aggiornati dall'API." if anni_fresh else ".")
-    )
-    st.divider()
-    st.caption(
-        "Dati: **Agenzia Entrate – OMI** "
-        "via [3eurotools.it](https://3eurotools.it/api-quotazioni-immobiliari-omi)\n\n"
-        "Prezzi riferiti a 100 mq commerciali."
-    )
-
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
-# MAIN
+# ZONE — caricate automaticamente al cambio comune
 # ─────────────────────────────────────────────
-st.title("🏠 Mercato Immobiliare Italia")
-st.markdown(
-    f"**{tipo_label}** · {'Acquisto' if operazione == 'acquisto' else 'Affitto/mese'} · "
-    f"{anni_range[0]}–{anni_range[1]} · 100 mq commerciali"
+with st.container():
+    st.markdown('<div class="search-card"><h2>📍 Zone OMI disponibili</h2>', unsafe_allow_html=True)
+
+    with st.spinner(f"Cerco le zone di **{comune_sel}**…"):
+        zone_disp = scopri_zone(codice_comune, tipo_api, operazione)
+
+    if not zone_disp:
+        st.warning("Nessuna zona trovata. Prova una tipologia diversa.")
+        zone_sel = []
+    else:
+        # Mostra badge per ogni fascia presente
+        fasce = sorted(set(z[0] for z in zone_disp))
+        badges = " ".join(
+            f'<span style="background:{COLORI_FASCIA.get(f,"#888")};color:#0f1923;'
+            f'padding:2px 8px;border-radius:999px;font-size:0.75rem;font-weight:700">'
+            f'{f} – {NOMI_FASCIA.get(f,"")}</span>'
+            for f in fasce
+        )
+        st.markdown(badges + "<br>", unsafe_allow_html=True)
+
+        opzioni = {zona_label(z): z for z in zone_disp}
+        # Default: prima zona di ogni fascia (max 4)
+        default = []
+        viste = set()
+        for z in zone_disp:
+            if z[0] not in viste:
+                default.append(zona_label(z))
+                viste.add(z[0])
+            if len(default) >= 4:
+                break
+
+        sel_labels = st.multiselect(
+            f"{len(zone_disp)} zone trovate — seleziona quelle da confrontare (max 6)",
+            options=list(opzioni.keys()),
+            default=default,
+            max_selections=6,
+            label_visibility="collapsed",
+        )
+        zone_sel = [opzioni[l] for l in sel_labels]
+
+    st.caption("[Visualizza zone su mappa →](https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php)")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# BOTTONE CERCA
+# ─────────────────────────────────────────────
+avvia = st.button(
+    f"📊 Analizza {comune_sel}",
+    disabled=len(zone_sel) == 0,
+    use_container_width=True,
 )
-st.divider()
 
+# ─────────────────────────────────────────────
+# ESECUZIONE
+# ─────────────────────────────────────────────
 if avvia:
-    if not serie_params:
-        st.warning("Seleziona almeno un comune o una zona.")
-        st.stop()
-
     tutti_df = []
-    for (nome_comune, codice, zona, label) in serie_params:
-        df = fetch_serie_storica(label, codice, anni_sel, tipo_api, operazione, zona)
+    for zona in zone_sel:
+        label = f"{zona} – {NOMI_FASCIA.get(zona[0], zona)}"
+        df = fetch_serie(label, codice_comune, anni_sel, tipo_api, operazione, zona)
         if not df.empty:
             tutti_df.append(df)
 
     if not tutti_df:
-        st.error("Nessun dato trovato. Prova con anni o zone diverse.")
+        st.error("Nessun dato trovato per le zone e il periodo selezionati.")
         st.stop()
 
-    st.session_state["df_all"] = pd.concat(tutti_df, ignore_index=True)
-    st.session_state["operazione"] = operazione
-    st.session_state["anni_range"] = anni_range
+    st.session_state.update({
+        "df_all": pd.concat(tutti_df, ignore_index=True),
+        "operazione": operazione,
+        "anni_range": anni_range,
+        "comune_sel": comune_sel,
+        "zone_sel": zone_sel,
+    })
 
+# ─────────────────────────────────────────────
+# RISULTATI
+# ─────────────────────────────────────────────
 if "df_all" in st.session_state:
-    df_all = st.session_state["df_all"]
-    op = st.session_state["operazione"]
-    unita = "€" if op == "acquisto" else "€/mese"
-    labels = df_all["label"].unique().tolist()
-    colori = px.colors.qualitative.Set2[: len(labels)]
-    colore_map = dict(zip(labels, colori))
+    df_all   = st.session_state["df_all"]
+    op       = st.session_state["operazione"]
+    c_nome   = st.session_state["comune_sel"]
+    unita    = "€/mq" if op == "acquisto" else "€/mq/mese"
+    labels   = df_all["label"].unique().tolist()
+    palette  = [COLORI_FASCIA.get(l[0], "#4a9eff") for l in labels]
+    c_map    = dict(zip(labels, palette))
 
-    # ── Grafico andamento ──
+    st.markdown(f'<p class="results-header">📍 {c_nome} · {"Acquisto" if op=="acquisto" else "Affitto"}</p>',
+                unsafe_allow_html=True)
+
+    # ── Metriche ultima quotazione ──
+    cols = st.columns(min(len(labels), 3))
+    for i, label in enumerate(labels):
+        dfl = df_all[df_all["label"] == label].sort_values("anno")
+        if dfl.empty:
+            continue
+        ult, pri = dfl.iloc[-1], dfl.iloc[0]
+        var = ((ult["medio"] - pri["medio"]) / pri["medio"] * 100) if pri["medio"] else 0
+        with cols[i % min(len(labels), 3)]:
+            st.metric(
+                label=label,
+                value=f"{ult['medio']:,.0f} {unita}",
+                delta=f"{var:+.1f}% dal {int(pri['anno'])}",
+            )
+
+    st.divider()
+
+    # ── Grafico andamento prezzi ──
     fig = go.Figure()
     for label in labels:
         dfl = df_all[df_all["label"] == label].sort_values("anno")
-        col = colore_map[label]
+        col = c_map[label]
+        # Fascia min-max
         if dfl["min"].notna().any():
-            fc = col.replace("rgb", "rgba").replace(")", ",0.12)") if col.startswith("rgb") else col + "20"
             fig.add_trace(go.Scatter(
                 x=pd.concat([dfl["anno"], dfl["anno"][::-1]]),
                 y=pd.concat([dfl["max"], dfl["min"][::-1]]),
-                fill="toself", fillcolor=fc,
+                fill="toself",
+                fillcolor=col.replace("#", "rgba(").replace(")", ",0.10)") if col.startswith("#") else col,
                 line=dict(color="rgba(0,0,0,0)"),
                 showlegend=False, hoverinfo="skip",
             ))
         fig.add_trace(go.Scatter(
             x=dfl["anno"], y=dfl["medio"],
             mode="lines+markers", name=label,
-            line=dict(color=col, width=2.5), marker=dict(size=7),
-            hovertemplate=f"<b>{label}</b><br>Anno: %{{x}}<br>Medio: %{{y:,.0f}} {unita}<extra></extra>",
+            line=dict(color=col, width=2.5),
+            marker=dict(size=6, color=col),
+            hovertemplate=f"<b>{label}</b><br>%{{x}}: %{{y:,.0f}} {unita}<extra></extra>",
         ))
 
     fig.update_layout(
-        title=dict(text=f"Andamento prezzi – {unita} (100 mq)", font=dict(size=18)),
-        xaxis=dict(title="Anno", tickmode="linear", dtick=1, gridcolor="#2a2d3a"),
-        yaxis=dict(title=f"Prezzo ({unita})", gridcolor="#2a2d3a", tickformat=",.0f"),
-        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        font=dict(color="#cdd1e0"),
-        legend=dict(bgcolor="#1a1d27", bordercolor="#2a2d3a", borderwidth=1,
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        hovermode="x unified",
-        height=420,
-        margin=dict(l=10, r=10, t=60, b=10),
+        title=dict(text="Andamento prezzi medi", font=dict(size=15, color="#e8eaf0")),
+        xaxis=dict(tickmode="linear", dtick=2, gridcolor="#1e2d3d", color="#6a7a8a"),
+        yaxis=dict(gridcolor="#1e2d3d", color="#6a7a8a", tickformat=",.0f"),
+        plot_bgcolor="#0f1923", paper_bgcolor="#0f1923",
+        font=dict(color="#c8d0dc", size=11),
+        legend=dict(bgcolor="rgba(0,0,0,0)", orientation="h",
+                    yanchor="bottom", y=1.02, xanchor="left", x=0),
+        hovermode="x unified", height=340,
+        margin=dict(l=0, r=0, t=40, b=0),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
-    # ── Metriche (max 3 per riga per non spiaccicarsi su mobile) ──
-    st.subheader("📊 Riepilogo")
-    n_cols = min(len(labels), 3)
-    cols = st.columns(n_cols)
-    for i, label in enumerate(labels):
-        dfl = df_all[df_all["label"] == label].sort_values("anno")
-        if dfl.empty:
-            continue
-        ultimo, primo = dfl.iloc[-1], dfl.iloc[0]
-        var = ((ultimo["medio"] - primo["medio"]) / primo["medio"] * 100) if primo["medio"] else 0
-        with cols[i % n_cols]:
-            st.metric(
-                label=label,
-                value=f"{ultimo['medio']:,.0f} {unita}",
-                delta=f"{var:+.1f}% dal {int(primo['anno'])}",
-            )
-            st.caption(f"Anno: {int(ultimo['anno'])} · Stato zona: *{ultimo['stato']}*")
-
-    # ── Variazione % YoY ──
-    st.subheader("📈 Variazione % anno su anno")
+    # ── Grafico variazione % YoY ──
     fig2 = go.Figure()
     for label in labels:
         dfl = df_all[df_all["label"] == label].sort_values("anno").copy()
-        dfl["var_pct"] = dfl["medio"].pct_change() * 100
+        dfl["var"] = dfl["medio"].pct_change() * 100
         fig2.add_trace(go.Bar(
-            x=dfl["anno"], y=dfl["var_pct"], name=label,
-            marker_color=colore_map[label],
-            hovertemplate=f"<b>{label}</b><br>%{{x}}: %{{y:+.1f}}%<extra></extra>",
+            x=dfl["anno"], y=dfl["var"], name=label,
+            marker_color=c_map[label],
+            hovertemplate=f"<b>{label}</b> %{{x}}: %{{y:+.1f}}%<extra></extra>",
         ))
     fig2.update_layout(
+        title=dict(text="Variazione % anno su anno", font=dict(size=15, color="#e8eaf0")),
         barmode="group",
-        xaxis=dict(title="Anno", tickmode="linear", dtick=1, gridcolor="#2a2d3a"),
-        yaxis=dict(title="Variazione %", gridcolor="#2a2d3a", ticksuffix="%"),
-        plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-        font=dict(color="#cdd1e0"),
-        legend=dict(bgcolor="#1a1d27", bordercolor="#2a2d3a", borderwidth=1,
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        height=320,
-        margin=dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(tickmode="linear", dtick=2, gridcolor="#1e2d3d", color="#6a7a8a"),
+        yaxis=dict(gridcolor="#1e2d3d", color="#6a7a8a", ticksuffix="%"),
+        plot_bgcolor="#0f1923", paper_bgcolor="#0f1923",
+        font=dict(color="#c8d0dc", size=11),
+        legend=dict(bgcolor="rgba(0,0,0,0)", orientation="h",
+                    yanchor="bottom", y=1.02, xanchor="left", x=0),
+        height=280, margin=dict(l=0, r=0, t=40, b=0),
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
     # ── Tabella ──
-    with st.expander("📋 Dati grezzi"):
-        df_show = df_all[["anno", "label", "min", "medio", "max", "stato", "fonte"]].copy()
-        df_show.columns = ["Anno", "Serie", f"Min ({unita})", f"Medio ({unita})", f"Max ({unita})", "Stato zona", "Fonte"]
-        st.dataframe(df_show.sort_values(["Serie", "Anno"]), use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Scarica CSV",
-            df_show.to_csv(index=False).encode("utf-8"),
-            "quotazioni_omi.csv", "text/csv",
-            use_container_width=True,
-        )
+    with st.expander("📋 Dati completi"):
+        df_show = df_all[["anno","label","min","medio","max","stato"]].copy()
+        df_show.columns = ["Anno","Zona",f"Min {unita}",f"Medio {unita}",f"Max {unita}","Stato zona"]
+        st.dataframe(df_show.sort_values(["Zona","Anno"]),
+                     use_container_width=True, hide_index=True)
+        st.download_button("⬇️ Scarica CSV",
+                           df_show.to_csv(index=False).encode("utf-8"),
+                           "quotazioni_omi.csv", "text/csv",
+                           use_container_width=True)
 
-else:
-    st.info(
-        "👈 Apri la **barra laterale** (freccia in alto a sinistra), "
-        "configura la ricerca e premi **Analizza andamento**.\n\n"
-        "**Puoi confrontare:**\n"
-        "- Diverse **zone OMI** dello stesso comune (es: B1, B3, C1 di Milano)\n"
-        "- Più **comuni** tra loro (es: Milano vs Roma vs Napoli)\n\n"
-        "[Mappa zone OMI →](https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php)"
-    )
+    st.markdown(
+        "<p style='text-align:center;color:#3a4a5a;font-size:0.75rem;margin-top:2rem'>"
+        "Fonte: Agenzia delle Entrate · Osservatorio Mercato Immobiliare (OMI) · 100 mq commerciali</p>",
+        unsafe_allow_html=True)
