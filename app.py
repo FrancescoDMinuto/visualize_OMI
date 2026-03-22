@@ -203,8 +203,11 @@ def anno_definitivo(a):
 def _chiama_api(codice, anno, tipo, op, zona):
     try:
         p = {
-            "codice_comune": codice, "anno": anno,
-            "tipo_immobile": tipo, "operazione": op, "metri_quadri": 100,
+            "codice_comune": codice, 
+            "anno": anno,
+            "tipo_immobile": tipo, 
+            "operazione": op, 
+            "metri_quadri": 1, # FORCED TO 1 TO GET PURE PRICE PER MQ
         }
         if zona:
             p["zona_omi"] = zona
@@ -391,15 +394,19 @@ if "df_all" in st.session_state:
         ult, pri = dfl.iloc[-1], dfl.iloc[0]
         var = ((ult["medio"] - pri["medio"]) / pri["medio"] * 100) if pri["medio"] else 0
         
-        # Calculate the total metric dynamically
-        prezzo_totale = ult["medio"] * mq_val
+        # Base per mq price direct from the API
+        prezzo_mq = ult["medio"]
+        prezzo_totale = prezzo_mq * mq_val
+        
+        # Italian thousands formatting
+        pmq_fmt = "{:,.0f}".format(prezzo_mq).replace(",", ".")
+        val_fmt = "€ " + "{:,.0f}".format(prezzo_totale).replace(",", ".")
         
         with cols[i % min(len(labels), 3)]:
-            # We set delta_color to 'off' so it renders entirely inside the clean gray secondary style
             st.metric(
-                label=f"{label} ({mq_val} mq)",
-                value="€ {:,.0f}".format(prezzo_totale),
-                delta="{:,.0f} {} ({:+.1f}%)".format(ult["medio"], unita, var),
+                label=f"{label}",
+                value=f"{pmq_fmt} {unita}",
+                delta=f"Totale ({mq_val} mq): {val_fmt}  ({var:+.1f}%)",
                 delta_color="off" 
             )
 
@@ -428,7 +435,7 @@ if "df_all" in st.session_state:
         ))
 
     fig.update_layout(
-        title=dict(text="Andamento prezzi medi al mq", font=dict(size=16, color="#222222", weight="bold")),
+        title=dict(text="Andamento storico prezzi al mq", font=dict(size=16, color="#222222", weight="bold")),
         xaxis=dict(tickmode="linear", dtick=2, gridcolor="#F0F0F0", color="#717171"),
         yaxis=dict(gridcolor="#F0F0F0", color="#717171", tickformat=",.0f"),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
@@ -451,7 +458,7 @@ if "df_all" in st.session_state:
             hovertemplate="<b>{}</b> %{{x}}: %{{y:+.1f}}%<extra></extra>".format(label),
         ))
     fig2.update_layout(
-        title=dict(text="Variazione % anno su anno", font=dict(size=16, color="#222222", weight="bold")),
+        title=dict(text="Variazione percentuale anno su anno", font=dict(size=16, color="#222222", weight="bold")),
         barmode="group",
         xaxis=dict(tickmode="linear", dtick=2, gridcolor="#F0F0F0", color="#717171"),
         yaxis=dict(gridcolor="#F0F0F0", color="#717171", ticksuffix="%"),
@@ -464,7 +471,7 @@ if "df_all" in st.session_state:
     st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
     st.markdown("<br>", unsafe_allow_html=True)
-    with st.expander("Mostra dati completi"):
+    with st.expander("Mostra dati completi (Valori al mq)"):
         df_show = df_all[["anno", "label", "min", "medio", "max", "stato"]].copy()
         df_show.columns = ["Anno", "Zona", "Min", "Medio", "Max", "Stato zona"]
         st.dataframe(df_show.sort_values(["Zona", "Anno"]),
@@ -477,7 +484,7 @@ if "df_all" in st.session_state:
         )
 
     st.markdown(
-        f"<p style='text-align:center;color:#717171;font-size:0.8rem;margin-top:2.5rem;font-weight:500;'>"
-        f"Fonte: Agenzia delle Entrate - OMI &middot; Calcolo su {mq_val} mq commerciali</p>",
+        "<p style='text-align:center;color:#717171;font-size:0.8rem;margin-top:2.5rem;font-weight:500;'>"
+        "Fonte: Agenzia delle Entrate - OMI</p>",
         unsafe_allow_html=True,
     )
