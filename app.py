@@ -8,46 +8,114 @@ from pathlib import Path
 
 st.set_page_config(
     page_title="Prezzi Immobili Italia",
-    page_icon="=",
+    page_icon="🏠",
     layout="centered",
     initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
 <style>
-  html, body, .stApp { background-color: #0f1923 !important; color: #e8eaf0; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  
+  html, body, .stApp { 
+      background-color: #F7F7F9 !important; 
+      color: #222222 !important; 
+      font-family: 'Inter', -apple-system, sans-serif !important;
+  }
+  
   section[data-testid="stSidebar"], button[kind="header"],
   header[data-testid="stHeader"], #MainMenu, footer { display: none !important; }
-  .block-container { padding: 1rem 1rem 4rem 1rem !important; max-width: 720px !important; }
+  
+  .block-container { 
+      padding: 2rem 1rem 4rem 1rem !important; 
+      max-width: 760px !important; 
+  }
+  
   .card {
-    background: #1a2535; border: 1px solid #2a3a50;
-    border-radius: 16px; padding: 1.2rem; margin-bottom: 1rem;
+    background: #FFFFFF; 
+    border: 1px solid #EBEBEB;
+    border-radius: 16px; 
+    padding: 1.5rem; 
+    margin-bottom: 1.5rem;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.04);
   }
+  
   .card-title {
-    font-size: 0.75rem; font-weight: 700; color: #c8a84b;
-    text-transform: uppercase; letter-spacing: 0.09em; margin: 0 0 0.9rem 0;
+    font-size: 0.85rem; 
+    font-weight: 700; 
+    color: #717171;
+    text-transform: uppercase; 
+    letter-spacing: 0.05em; 
+    margin: 0 0 1rem 0;
   }
+  
   .stMultiSelect [data-baseweb="tag"] {
-    background-color: #1e3a5f !important; border: 1px solid #3a6090 !important;
-    color: #a8c8f0 !important; border-radius: 6px !important;
+    background-color: #F7F7F9 !important; 
+    border: 1px solid #DDDDDD !important;
+    color: #222222 !important; 
+    border-radius: 8px !important;
+    font-weight: 500;
   }
+  
   div[data-testid="stButton"] > button {
-    width: 100%; background: #c8a84b; color: #0f1923;
-    font-weight: 800; font-size: 1rem; border: none;
-    border-radius: 12px; padding: 0.75rem; letter-spacing: 0.03em;
+    width: 100%; 
+    background: #FF385C; 
+    color: #FFFFFF;
+    font-weight: 600; 
+    font-size: 1rem; 
+    border: none;
+    border-radius: 12px; 
+    padding: 0.75rem; 
+    transition: transform 0.1s ease, background 0.2s ease;
   }
-  div[data-testid="stButton"] > button:hover { background: #dfc06a; }
+  
+  div[data-testid="stButton"] > button:hover { 
+      background: #D90B3E; 
+      color: #FFFFFF;
+  }
+  
+  div[data-testid="stButton"] > button:active {
+      transform: scale(0.98);
+  }
+  
   [data-testid="metric-container"] {
-    background: #1a2535; border: 1px solid #2a3a50;
-    border-radius: 12px; padding: 0.8rem 1rem;
+    background: #FFFFFF; 
+    border: 1px solid #EBEBEB;
+    border-radius: 16px; 
+    padding: 1.2rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
   }
-  [data-testid="metric-container"] label { color: #8a9ab0 !important; font-size: 0.75rem !important; }
+  
+  [data-testid="metric-container"] label { 
+      color: #717171 !important; 
+      font-size: 0.85rem !important; 
+      font-weight: 500 !important;
+  }
+  
+  [data-testid="metric-container"] div[data-testid="stMetricValue"] {
+      color: #222222 !important;
+      font-weight: 700 !important;
+  }
+  
   .results-label {
-    font-size: 0.75rem; color: #6a7a8a; text-transform: uppercase;
-    letter-spacing: 0.08em; margin: 1.2rem 0 0.4rem 0;
+    font-size: 1.25rem; 
+    font-weight: 700;
+    color: #222222; 
+    margin: 1.5rem 0 1rem 0;
   }
+  
+  p, div, span, label {
+      color: #222222;
+  }
+  
+  .stSelectbox label, .stRadio label, .stSlider label, .stNumberInput label {
+      font-weight: 600 !important;
+      color: #222222 !important;
+  }
+  
   @media (max-width: 600px) {
-    .block-container { padding: 0.5rem 0.5rem 3rem 0.5rem !important; }
+    .block-container { padding: 1rem 0.5rem 3rem 0.5rem !important; }
+    .card { padding: 1rem; }
   }
 </style>
 """, unsafe_allow_html=True)
@@ -73,9 +141,14 @@ FASCIA_LABEL = {
     "A": "Centrale/Pregio", "B": "Semicentrale", "C": "Periferica",
     "D": "Suburbana",       "E": "Extraurbana",  "R": "Rurale",
 }
+
 FASCIA_COLOR = {
-    "A": "#f0a500", "B": "#4a9eff", "C": "#50c878",
-    "D": "#c87850", "E": "#a87fcc", "R": "#78c8c8",
+    "A": "#FF385C", 
+    "B": "#00A699", 
+    "C": "#FFB400", 
+    "D": "#FC642D", 
+    "E": "#484848", 
+    "R": "#767676", 
 }
 
 def hex_to_rgba(h, alpha=0.15):
@@ -84,7 +157,7 @@ def hex_to_rgba(h, alpha=0.15):
     return "rgba({},{},{},{})".format(r, g, b, alpha)
 
 def colore_zona(zona):
-    return FASCIA_COLOR.get(zona[0] if zona else "B", "#4a9eff")
+    return FASCIA_COLOR.get(zona[0] if zona else "B", "#00A699")
 
 @st.cache_data(show_spinner=False)
 def carica_dati():
@@ -199,21 +272,21 @@ def accorcia_legenda(testo):
 
 # --- UI ---
 
-st.markdown("## Prezzi Immobili Italia")
+st.markdown("<h2 style='font-weight: 700; color: #222222; margin-bottom: 0.2rem;'>Prezzi Immobili Italia</h2>", unsafe_allow_html=True)
 st.markdown(
-    "<p style='color:#6a7a8a;font-size:0.85rem;margin-top:-0.5rem'>"
+    "<p style='color:#717171;font-size:0.95rem;margin-top:0;margin-bottom:2rem;font-weight:500;'>"
     "Dati ufficiali Agenzia delle Entrate - OMI</p>",
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="card"><p class="card-title">Ricerca</p>', unsafe_allow_html=True)
+st.markdown('<div class="card"><p class="card-title">Cerca una città</p>', unsafe_allow_html=True)
 
 comune_sel = st.selectbox(
     "Comune", NOMI_COMUNI,
     index=NOMI_COMUNI.index("Novara") if "Novara" in NOMI_COMUNI else 0,
     label_visibility="collapsed",
 )
-codice_comune = COMUNI[comune_sel]
+codice_comune = COMUNI.get(comune_sel, "H501")
 
 c1, c2, c3 = st.columns([4, 2, 3])
 with c1:
@@ -232,15 +305,15 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="card"><p class="card-title">Zone OMI</p>', unsafe_allow_html=True)
 
 zone_disp = zone_del_comune(codice_comune)
-
 zone_sel = []
+
 if not zone_disp:
     st.warning("Nessuna zona trovata per questo comune.")
 else:
     fasce = sorted(set(z[0] for z in zone_disp))
     badges = " ".join(
-        '<span style="background:{};color:#0f1923;'.format(FASCIA_COLOR.get(f, "#888")) +
-        'padding:3px 10px;border-radius:999px;font-size:0.72rem;font-weight:700">' +
+        '<span style="background:{};color:#FFFFFF;'.format(FASCIA_COLOR.get(f, "#888")) +
+        'padding:4px 12px;border-radius:999px;font-size:0.75rem;font-weight:600;display:inline-block;margin-bottom:8px;">' +
         '{}</span>'.format(FASCIA_LABEL.get(f, f))
         for f in fasce
     )
@@ -265,7 +338,11 @@ else:
     )
     zone_sel = [opzioni[l] for l in sel_labels]
 
-st.caption("Visualizza zone su mappa: https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php")
+st.markdown(
+    "<a href='https://www1.agenziaentrate.gov.it/servizi/geopoi_omi/index.php' target='_blank' "
+    "style='font-size:0.8rem;color:#717171;text-decoration:underline;'>Visualizza zone su mappa ufficiale</a>", 
+    unsafe_allow_html=True
+)
 st.markdown('</div>', unsafe_allow_html=True)
 
 avvia = st.button(
@@ -304,7 +381,7 @@ if "df_all" in st.session_state:
     c_map   = {l: colore_zona(l.split("-")[0].strip()) for l in labels}
 
     st.markdown(
-        '<p class="results-label">{} - {} - {}-{}</p>'.format(
+        '<p class="results-label">{} &middot; {} &middot; {}-{}</p>'.format(
             c_nome,
             "Acquisto" if op == "acquisto" else "Affitto",
             st.session_state["anni_range"][0],
@@ -332,7 +409,7 @@ if "df_all" in st.session_state:
                 delta_color="off"
             )
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     fig = go.Figure()
     for label in labels:
@@ -349,7 +426,7 @@ if "df_all" in st.session_state:
                 x=pd.concat([dfl["anno"], dfl["anno"][::-1]]),
                 y=pd.concat([prezzi_max_tot, prezzi_min_tot[::-1]]),
                 fill="toself",
-                fillcolor=hex_to_rgba(col, 0.15),
+                fillcolor=hex_to_rgba(col, 0.1),
                 line=dict(color="rgba(0,0,0,0)"),
                 showlegend=False,
                 hoverinfo="skip",
@@ -357,21 +434,21 @@ if "df_all" in st.session_state:
         fig.add_trace(go.Scatter(
             x=dfl["anno"], y=prezzi_medio_tot,
             mode="lines+markers", name=nome_legenda,
-            line=dict(color=col, width=2.5),
-            marker=dict(size=6, color=col),
+            line=dict(color=col, width=3),
+            marker=dict(size=8, color=col, line=dict(color="#FFFFFF", width=1.5)),
             hovertemplate="<b>{}</b><br>%{{x}}: € %{{y:,.0f}}<extra></extra>".format(nome_legenda),
         ))
 
     fig.update_layout(
-        title=dict(text=f"Andamento storico prezzo totale ({mq_val} mq)", font=dict(size=15, color="#e8eaf0")),
-        xaxis=dict(tickmode="linear", dtick=2, gridcolor="#1e2d3d", color="#6a7a8a"),
-        yaxis=dict(gridcolor="#1e2d3d", color="#6a7a8a", tickformat=",.0f"),
-        plot_bgcolor="#0f1923", paper_bgcolor="#0f1923",
-        font=dict(color="#c8d0dc", size=11),
-        legend=dict(bgcolor="rgba(0,0,0,0)", orientation="h",
-                    yanchor="bottom", y=1.02, xanchor="left", x=0),
-        hovermode="x unified", height=340,
-        margin=dict(l=0, r=0, t=40, b=0),
+        title=dict(text=f"Andamento storico prezzo totale ({mq_val} mq)", font=dict(size=16, color="#222222", weight="bold")),
+        xaxis=dict(tickmode="linear", dtick=2, gridcolor="#F0F0F0", color="#717171"),
+        yaxis=dict(gridcolor="#F0F0F0", color="#717171", tickformat=",.0f"),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, sans-serif", color="#717171", size=13),
+        legend=dict(bgcolor="rgba(255,255,255,0.8)", orientation="h",
+                    yanchor="bottom", y=1.05, xanchor="left", x=0),
+        hovermode="x unified", height=380,
+        margin=dict(l=0, r=0, t=60, b=0),
     )
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
@@ -384,22 +461,24 @@ if "df_all" in st.session_state:
         fig2.add_trace(go.Bar(
             x=dfl["anno"], y=dfl["var"], name=nome_legenda,
             marker_color=c_map[label],
+            marker_line=dict(color="#FFFFFF", width=1),
             hovertemplate="<b>{}</b> %{{x}}: %{{y:+.1f}}%<extra></extra>".format(nome_legenda),
         ))
     fig2.update_layout(
-        title=dict(text="Variazione percentuale anno su anno", font=dict(size=15, color="#e8eaf0")),
+        title=dict(text="Variazione percentuale anno su anno", font=dict(size=16, color="#222222", weight="bold")),
         barmode="group",
-        xaxis=dict(tickmode="linear", dtick=2, gridcolor="#1e2d3d", color="#6a7a8a"),
-        yaxis=dict(gridcolor="#1e2d3d", color="#6a7a8a", ticksuffix="%"),
-        plot_bgcolor="#0f1923", paper_bgcolor="#0f1923",
-        font=dict(color="#c8d0dc", size=11),
-        legend=dict(bgcolor="rgba(0,0,0,0)", orientation="h",
-                    yanchor="bottom", y=1.02, xanchor="left", x=0),
-        height=280, margin=dict(l=0, r=0, t=40, b=0),
+        xaxis=dict(tickmode="linear", dtick=2, gridcolor="#F0F0F0", color="#717171"),
+        yaxis=dict(gridcolor="#F0F0F0", color="#717171", ticksuffix="%"),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, sans-serif", color="#717171", size=13),
+        legend=dict(bgcolor="rgba(255,255,255,0.8)", orientation="h",
+                    yanchor="bottom", y=1.05, xanchor="left", x=0),
+        height=320, margin=dict(l=0, r=0, t=60, b=0),
     )
     st.plotly_chart(fig2, use_container_width=True, config={"displayModeBar": False})
 
-    with st.expander("Dati completi"):
+    st.markdown("<br>", unsafe_allow_html=True)
+    with st.expander("Mostra dati completi (Valori al mq)"):
         df_show = df_all[["anno", "label", "min", "medio", "max", "stato"]].copy()
         df_show.columns = ["Anno", "Zona", "Min", "Medio", "Max", "Stato zona"]
         st.dataframe(df_show.sort_values(["Zona", "Anno"]),
@@ -412,7 +491,7 @@ if "df_all" in st.session_state:
         )
 
     st.markdown(
-        f"<p style='text-align:center;color:#3a4a5a;font-size:0.75rem;margin-top:2rem'>"
-        f"Fonte: Agenzia delle Entrate - OMI &middot; Grafico scalato su {mq_val} mq</p>",
+        f"<p style='text-align:center;color:#717171;font-size:0.8rem;margin-top:2.5rem;font-weight:500;'>"
+        f"Fonte: Agenzia delle Entrate - OMI &middot; Grafici calcolati su {mq_val} mq</p>",
         unsafe_allow_html=True,
     )
