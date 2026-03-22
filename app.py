@@ -108,7 +108,7 @@ st.markdown("""
       color: #222222;
   }
   
-  .stSelectbox label, .stRadio label, .stSlider label {
+  .stSelectbox label, .stRadio label, .stSlider label, .stNumberInput label {
       font-weight: 600 !important;
       color: #222222 !important;
   }
@@ -142,14 +142,13 @@ FASCIA_LABEL = {
     "D": "Suburbana",       "E": "Extraurbana",  "R": "Rurale",
 }
 
-# Updated to a more vibrant, modern palette suitable for light themes
 FASCIA_COLOR = {
-    "A": "#FF385C", # Airbnb Red
-    "B": "#00A699", # Teal/Green
-    "C": "#FFB400", # Warm Yellow
-    "D": "#FC642D", # Orange
-    "E": "#484848", # Dark Gray
-    "R": "#767676", # Medium Gray
+    "A": "#FF385C", 
+    "B": "#00A699", 
+    "C": "#FFB400", 
+    "D": "#FC642D", 
+    "E": "#484848", 
+    "R": "#767676", 
 }
 
 def hex_to_rgba(h, alpha=0.15):
@@ -162,8 +161,6 @@ def colore_zona(zona):
 
 @st.cache_data(show_spinner=False)
 def carica_dati():
-    # If the parquet files don't exist locally during this test, Streamlit will error out.
-    # Keep your original logic here.
     try:
         zone_df   = pd.read_parquet(BASE_DIR / "zone.parquet")
         comuni_df = pd.read_parquet(BASE_DIR / "comuni.parquet")
@@ -174,7 +171,6 @@ def carica_dati():
         comuni_dict = dict(zip(comuni_df["nome"], comuni_df["codice"]))
         return zone_lookup, comuni_dict
     except FileNotFoundError:
-        # Fallback for testing UI without data files
         return {}, {"Roma": "H501", "Milano": "F205", "Torino": "L219"}
 
 ZONE_LOOKUP, COMUNI = carica_dati()
@@ -285,11 +281,13 @@ comune_sel = st.selectbox(
 )
 codice_comune = COMUNI.get(comune_sel, "H501")
 
-c1, c2 = st.columns([3, 2])
+c1, c2, c3 = st.columns([4, 2, 3])
 with c1:
     tipo_label = st.selectbox("Tipologia", list(TIPI_IMMOBILE.keys()))
     tipo_api   = TIPI_IMMOBILE[tipo_label]
 with c2:
+    mq_sel = st.number_input("Superficie (mq)", min_value=10, max_value=1500, value=100, step=5)
+with c3:
     operazione = st.radio("Operazione", ["acquisto", "affitto"], horizontal=True)
 
 anni_range = st.slider("Periodo", 2004, 2025, (2012, 2024))
@@ -363,13 +361,15 @@ if avvia:
         "operazione": operazione,
         "anni_range": anni_range,
         "comune_sel": comune_sel,
+        "mq_sel":     mq_sel,
     })
 
 if "df_all" in st.session_state:
     df_all  = st.session_state["df_all"]
     op      = st.session_state["operazione"]
     c_nome  = st.session_state["comune_sel"]
-    unita   = "euro/mq" if op == "acquisto" else "euro/mq/mese"
+    mq_val  = st.session_state["mq_sel"]
+    unita   = "€/mq" if op == "acquisto" else "€/mq/mese"
     labels  = df_all["label"].unique().tolist()
     c_map   = {l: colore_zona(l.split("-")[0].strip()) for l in labels}
 
@@ -390,11 +390,17 @@ if "df_all" in st.session_state:
             continue
         ult, pri = dfl.iloc[-1], dfl.iloc[0]
         var = ((ult["medio"] - pri["medio"]) / pri["medio"] * 100) if pri["medio"] else 0
+        
+        # Calculate the total metric dynamically
+        prezzo_totale = ult["medio"] * mq_val
+        
         with cols[i % min(len(labels), 3)]:
+            # We set delta_color to 'off' so it renders entirely inside the clean gray secondary style
             st.metric(
-                label=label,
-                value="{:,.0f} {}".format(ult["medio"], unita),
-                delta="{:+.1f}% dal {}".format(var, int(pri["anno"])),
+                label=f"{label} ({mq_val} mq)",
+                value="€ {:,.0f}".format(prezzo_totale),
+                delta="{:,.0f} {} ({:+.1f}%)".format(ult["medio"], unita, var),
+                delta_color="off" 
             )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -422,7 +428,7 @@ if "df_all" in st.session_state:
         ))
 
     fig.update_layout(
-        title=dict(text="Andamento prezzi medi", font=dict(size=16, color="#222222", weight="bold")),
+        title=dict(text="Andamento prezzi medi al mq", font=dict(size=16, color="#222222", weight="bold")),
         xaxis=dict(tickmode="linear", dtick=2, gridcolor="#F0F0F0", color="#717171"),
         yaxis=dict(gridcolor="#F0F0F0", color="#717171", tickformat=",.0f"),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
@@ -471,7 +477,7 @@ if "df_all" in st.session_state:
         )
 
     st.markdown(
-        "<p style='text-align:center;color:#717171;font-size:0.8rem;margin-top:2.5rem;font-weight:500;'>"
-        "Fonte: Agenzia delle Entrate - OMI &middot; 100 mq commerciali</p>",
+        f"<p style='text-align:center;color:#717171;font-size:0.8rem;margin-top:2.5rem;font-weight:500;'>"
+        f"Fonte: Agenzia delle Entrate - OMI &middot; Calcolo su {mq_val} mq commerciali</p>",
         unsafe_allow_html=True,
     )
